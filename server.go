@@ -3,12 +3,13 @@ package main
 import (
 	"fmt"
 	"go3/env"
-
-	"github.com/joho/godotenv"
 )
 
 func main() {
+	env.LoadEnv()
 	fmt.Println("Hello, World!")
-	godotenv.Load()
-	fmt.Println(env.HOST.GetValue())
+	fmt.Println("Host: " + env.Host.Get())
+	fmt.Println("Port: " + env.Port.Get())
+	fmt.Println("API Host: " + env.APIHost.Get())
+	fmt.Println("API Port: " + env.APIPort.Get())
 }
