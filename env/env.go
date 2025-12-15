@@ -25,4 +25,5 @@ const (
 	Port    EnvKey = "PORT"
 	APIHost EnvKey = "API_HOST"
 	APIPort EnvKey = "API_PORT"
+	DevMode EnvKey = "DEV"
 )
