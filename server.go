@@ -127,20 +127,21 @@ func main() {
 	// Initial load
 	videos = loadVideos()
 
-	http.HandleFunc("/get_random", handleRandom)
-	http.HandleFunc("/add", handleAdd)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/get_random", handleRandom)
+	mux.HandleFunc("/add", handleAdd)
 
 	address := fmt.Sprintf("%s:%s", env.Host.Get(), env.Port.Get())
 
 	if env.UseTLS.Get() == "FALSE" {
-		err := serve(address)
+		err := serve(address, mux)
 		if err != nil {
 			log.Fatal("Server failed: ", err)
 		}
 		return
 	}
 	if env.UseTLS.Get() == "TRUE" {
-		err := serveTLS(address)
+		err := serveTLS(address, mux)
 		if err != nil {
 			log.Fatal("Server failed: ", err)
 		}
@@ -148,12 +149,12 @@ func main() {
 	}
 }
 
-func serve(addr string) error {
+func serve(addr string, mux *http.ServeMux) error {
 	log.Printf("Server starting on http://%s\n", addr)
-	return http.ListenAndServe(addr, nil)
+	return http.ListenAndServe(addr, mux)
 }
 
-func serveTLS(addr string) error {
+func serveTLS(addr string, mux *http.ServeMux) error {
 	allowedOrigins := strings.Split(env.AllowedOrigins.Get(), ",")
 	allowedMethods := strings.Split(env.AllowedMethods.Get(), ",")
 	log.Println("AllowedOrigins: ", allowedOrigins)
@@ -163,7 +164,7 @@ func serveTLS(addr string) error {
 		AllowedMethods:   allowedMethods,
 		AllowedHeaders:   []string{"*"},
 		AllowCredentials: true,
-	}).Handler(nil)
+	}).Handler(mux)
 
 	log.Println("TLS cert path: ", env.TLSCertPath.Get())
 	log.Println("TLS key path: ", env.TLSKeyPath.Get())
