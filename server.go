@@ -129,9 +129,29 @@ func main() {
 	http.HandleFunc("/add", handleAdd)
 
 	address := fmt.Sprintf("%s:%s", env.Host.Get(), env.Port.Get())
-	log.Printf("Server starting on http://%s\n", address)
 
-	if err := http.ListenAndServe(address, nil); err != nil {
-		log.Fatal("Server failed: ", err)
+	if env.UseTLS.Get() == "FALSE" {
+		log.Printf("Server starting on http://%s\n", address)
+		err := serve(address)
+		if err != nil {
+			log.Fatal("Server failed: ", err)
+		}
+		return
 	}
+	if env.UseTLS.Get() == "TRUE" {
+		log.Printf("Server starting on https://%s\n", address)
+		err := serveTLS(address)
+		if err != nil {
+			log.Fatal("Server failed: ", err)
+		}
+		return
+	}
+}
+
+func serve(addr string) error {
+	return http.ListenAndServe(addr, nil)
+}
+
+func serveTLS(addr string) error {
+	return http.ListenAndServeTLS(addr, env.TLSCertPath.Get(), env.TLSKeyPath.Get(), nil)
 }

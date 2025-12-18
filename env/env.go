@@ -27,4 +27,7 @@ const (
 	APIPort      EnvKey = "API_PORT"
 	DevMode      EnvKey = "DEV"
 	VideosIDFile EnvKey = "VIDEO_IDS_FILENAME"
+	UseTLS       EnvKey = "USE_TLS"
+	TLSCertPath  EnvKey = "TLS_CERT_PATH"
+	TLSKeyPath   EnvKey = "TLS_KEY_PATH"
 )
