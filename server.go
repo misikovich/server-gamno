@@ -88,22 +88,26 @@ func handleRandom(w http.ResponseWriter, r *http.Request) {
 
 	if len(videos) == 0 {
 		http.Error(w, "No videos available", http.StatusNotFound)
+		log.Println("Request for random video failed, no videos available")
 		return
 	}
 
 	randomVideo := getRandomVideo(videos)
 	fmt.Fprintln(w, randomVideo)
+	log.Println("Requested random video: " + randomVideo)
 }
 
 func handleAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		log.Println("Request for adding video failed, method not allowed")
 		return
 	}
 
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		http.Error(w, "Missing video 'id' parameter", http.StatusBadRequest)
+		log.Println("Request for adding video failed, missing video 'id' parameter")
 		return
 	}
 
@@ -114,11 +118,13 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 	videos, err = addVideo(videos, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		log.Println("Request for adding video failed, invalid video id")
 		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
 	fmt.Fprintf(w, "Video '%s' added successfully\n", id)
+	log.Println("Requested adding video: " + id)
 }
 
 func main() {
