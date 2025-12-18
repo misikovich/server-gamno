@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/rs/cors"
 )
 
 var (
@@ -34,7 +36,7 @@ func loadVideos() []string {
 	if err != nil {
 		log.Fatal("Error loading videos: \n" + err.Error())
 	}
-	log.Println("Loaded videos: \n" + strings.Join(videos, "\n"))
+	log.Printf("Loaded [%d] videos\n", len(videos))
 	return videos
 }
 
@@ -131,7 +133,6 @@ func main() {
 	address := fmt.Sprintf("%s:%s", env.Host.Get(), env.Port.Get())
 
 	if env.UseTLS.Get() == "FALSE" {
-		log.Printf("Server starting on http://%s\n", address)
 		err := serve(address)
 		if err != nil {
 			log.Fatal("Server failed: ", err)
@@ -139,7 +140,6 @@ func main() {
 		return
 	}
 	if env.UseTLS.Get() == "TRUE" {
-		log.Printf("Server starting on https://%s\n", address)
 		err := serveTLS(address)
 		if err != nil {
 			log.Fatal("Server failed: ", err)
@@ -149,9 +149,24 @@ func main() {
 }
 
 func serve(addr string) error {
+	log.Printf("Server starting on http://%s\n", addr)
 	return http.ListenAndServe(addr, nil)
 }
 
 func serveTLS(addr string) error {
-	return http.ListenAndServeTLS(addr, env.TLSCertPath.Get(), env.TLSKeyPath.Get(), nil)
+	allowedOrigins := strings.Split(env.AllowedOrigins.Get(), ",")
+	allowedMethods := strings.Split(env.AllowedMethods.Get(), ",")
+	log.Println("AllowedOrigins: ", allowedOrigins)
+	log.Println("AllowedMethods: ", allowedMethods)
+	handler := cors.New(cors.Options{
+		AllowedOrigins:   allowedOrigins,
+		AllowedMethods:   allowedMethods,
+		AllowedHeaders:   []string{"*"},
+		AllowCredentials: true,
+	}).Handler(nil)
+
+	log.Println("TLS cert path: ", env.TLSCertPath.Get())
+	log.Println("TLS key path: ", env.TLSKeyPath.Get())
+	log.Printf("Server starting on https://%s\n", addr)
+	return http.ListenAndServeTLS(addr, env.TLSCertPath.Get(), env.TLSKeyPath.Get(), handler)
 }

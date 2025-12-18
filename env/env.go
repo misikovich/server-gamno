@@ -21,13 +21,15 @@ func LoadEnv() {
 }
 
 const (
-	Host         EnvKey = "HOST"
-	Port         EnvKey = "PORT"
-	APIHost      EnvKey = "API_HOST"
-	APIPort      EnvKey = "API_PORT"
-	DevMode      EnvKey = "DEV"
-	VideosIDFile EnvKey = "VIDEO_IDS_FILENAME"
-	UseTLS       EnvKey = "USE_TLS"
-	TLSCertPath  EnvKey = "TLS_CERT_PATH"
-	TLSKeyPath   EnvKey = "TLS_KEY_PATH"
+	Host           EnvKey = "HOST"
+	Port           EnvKey = "PORT"
+	APIHost        EnvKey = "API_HOST"
+	APIPort        EnvKey = "API_PORT"
+	DevMode        EnvKey = "DEV"
+	VideosIDFile   EnvKey = "VIDEO_IDS_FILENAME"
+	UseTLS         EnvKey = "USE_TLS"
+	TLSCertPath    EnvKey = "TLS_CERT_PATH"
+	TLSKeyPath     EnvKey = "TLS_KEY_PATH"
+	AllowedOrigins EnvKey = "ALLOWED_ORIGINS"
+	AllowedMethods EnvKey = "ALLOWED_METHODS"
 )
