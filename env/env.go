@@ -21,9 +21,10 @@ func LoadEnv() {
 }
 
 const (
-	Host    EnvKey = "HOST"
-	Port    EnvKey = "PORT"
-	APIHost EnvKey = "API_HOST"
-	APIPort EnvKey = "API_PORT"
-	DevMode EnvKey = "DEV"
+	Host         EnvKey = "HOST"
+	Port         EnvKey = "PORT"
+	APIHost      EnvKey = "API_HOST"
+	APIPort      EnvKey = "API_PORT"
+	DevMode      EnvKey = "DEV"
+	VideosIDFile EnvKey = "VIDEO_IDS_FILENAME"
 )
