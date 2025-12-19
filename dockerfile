@@ -44,29 +44,17 @@ COPY --from=builder /app/server .
 COPY .env .
 COPY videos.json .
 
-# Create an empty DB file if it doesn't exist, though the app should handle it
-RUN touch videos.db
+# Note: We don't 'touch' or use 'VOLUME' here because we will 
+# bind-mount the file from the host at runtime using '-v'.
+# This avoids the "cannot mount volume over existing file" error.
 
-# Expose the port (defaulting to 8080 or whatever is in your .env)
+# Expose the server port
 EXPOSE 1488
-#my server is hosted on api.femboyz.cloud:1488 what should i add to the dockerfile to make it work?
-#you should add the following to the dockerfile:
-ENV HOST=api.femboyz.cloud
+
+# Important: HOST must be 0.0.0.0 inside Docker to allow external access.
+# api.femboyz.cloud is your external address; internal binding must be 0.0.0.0.
+ENV HOST=0.0.0.0
 ENV PORT=1488
 
 # Run the server
 CMD ["./server"]
-
-#mount volumes
-VOLUME ["/app/videos.db"]
-#will this volume be created if it doesn't exist?
-#yes, it will be created
-#will it persist after container is removed?
-#yes, it will persist
-#are u sure?
-#geminis honest answer: yes
-#how do i use it?
-#you can use it by running the container with the -v flag
-#example: docker run -v /path/to/videos.db:/app/videos.db -p 8080:8080 go3
-#should i just move the dockerfile to the root of the server directory?
-#yes, you should
