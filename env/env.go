@@ -32,4 +32,6 @@ const (
 	TLSKeyPath     EnvKey = "TLS_KEY_PATH"
 	AllowedOrigins EnvKey = "ALLOWED_ORIGINS"
 	AllowedMethods EnvKey = "ALLOWED_METHODS"
+	DBPath         EnvKey = "DB_PATH"
+	YTDataAPIv3Key EnvKey = "YT_DATA_API_V3_KEY"
 )
