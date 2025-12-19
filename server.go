@@ -2,19 +2,27 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go3/db"
 	"go3/env"
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/fred1268/go-clap/clap"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/rs/cors"
 )
+
+type config struct {
+	Migrate bool `clap:"--migrate,-m"`
+	ClearDB bool `clap:"--clear-db,-c"`
+}
 
 var (
 	videos []string
@@ -123,11 +131,6 @@ func handleRandomV2(w http.ResponseWriter, r *http.Request) {
 		VideoAuthorName: video.VideoAuthorName,
 		IsEmbeddable:    video.IsEmbeddable,
 	}
-	//send json response
-	//is this correct?
-	//answer: yes
-	//what will client receive?
-	//answer: VideoResponse struct
 	json.NewEncoder(w).Encode(response)
 	log.Println("Requested random video: " + video.ID)
 }
@@ -153,28 +156,28 @@ func getYTvideoInfo(id string, w http.ResponseWriter) (YouTubeResponse, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		http.Error(w, "Failed to fetch video info", http.StatusInternalServerError)
-		log.Println("Error fetching video info: ", err)
+		log.Println("[yt] Error fetching video info: ", err)
 		return YouTubeResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		http.Error(w, "YouTube API returned error", resp.StatusCode)
-		log.Println("Error fetching video info: ", resp.Status)
+		log.Println("[yt] Error fetching video info: ", resp.Status)
 		return YouTubeResponse{}, err
 	}
 
 	var ytResp YouTubeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&ytResp); err != nil {
 		http.Error(w, "Failed to parse YouTube response", http.StatusInternalServerError)
-		log.Println("Error parsing YouTube response: ", err)
+		log.Println("[yt] Error parsing YouTube response: ", err)
 		return YouTubeResponse{}, err
 	}
 
 	if len(ytResp.Items) == 0 {
 		http.Error(w, "Video not found", http.StatusNotFound)
-		log.Println("Video not found: ", id)
-		return YouTubeResponse{}, err
+		log.Println("[yt] Video not found: ", id)
+		return YouTubeResponse{}, errors.New("video not found")
 	}
 	return ytResp, nil
 }
@@ -195,9 +198,22 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("Requested adding video: " + id)
 
+	//check if video exists
+	exists, err := db.IsVideoSaved(id)
+	if err != nil {
+		http.Error(w, "Failed to check if video exists", http.StatusInternalServerError)
+		log.Println("Error checking if video exists: ", err)
+		return
+	}
+	if exists {
+		http.Error(w, "Video already exists", http.StatusConflict)
+		log.Println("Request for adding video failed, [video already exists]")
+		return
+	}
+
 	ytResp, err := getYTvideoInfo(id, w)
 	if err != nil {
-		log.Println("Error fetching video info: ", err)
+		log.Println("Error fetching video info:", err)
 		return
 	}
 
@@ -217,15 +233,14 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 		AddedFromIP:     ip,
 	}
 
-	log.Printf("Parsed video: %s\n",
-		strings.Join([]string{
-			video.ID,
-			video.VideoName,
-			video.VideoAuthorName,
-			fmt.Sprintf("%t", video.IsEmbeddable),
-			fmt.Sprintf("%d", video.AddedAt),
-			video.AddedFromIP,
-		}, "\n"))
+	log.Printf("Parsed video:\n- ID: %s\n- Name: %s\n- Author: %s\n- Embeddable: %t\n- Timestamp: %d\n- IP: %s\n",
+		video.ID,
+		video.VideoName,
+		video.VideoAuthorName,
+		video.IsEmbeddable,
+		video.AddedAt,
+		video.AddedFromIP,
+	)
 
 	// Insert into Database
 	if err := db.InsertVideo(video); err != nil {
@@ -239,20 +254,31 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 	// mu.Lock()
 	// defer mu.Unlock()
 
-	// videos, err = addVideo(videos, id)
-	// if err != nil {
-	// 	http.Error(w, err.Error(), http.StatusBadRequest)
-	// 	log.Println("Request for adding video failed, [invalid video id]")
-	// 	return
-	// }
-
-	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, "Video '%s' (%s) added successfully\n", video.ID, video.VideoName)
+	//return json response in VideoResponse format
+	w.Header().Set("Content-Type", "application/json")
+	response := VideoResponse{
+		ID:              video.ID,
+		VideoName:       video.VideoName,
+		VideoAuthorName: video.VideoAuthorName,
+		IsEmbeddable:    video.IsEmbeddable,
+	}
+	json.NewEncoder(w).Encode(response)
+	//fmt.Fprintf(w, "Successfully added video '%s' (%s)\n", video.ID, video.VideoName)
 }
 
-func migrateDBfromJSON(videos []string) {
+func migrateDBfromJSON() {
+	videos := loadVideos()
 	for _, video := range videos {
-		log.Println("Migrating video: " + video)
+		log.Println(video, "- migrating video...")
+		exists, err := db.IsVideoSaved(video)
+		if err != nil {
+			log.Println("Error checking if video exists: ", err)
+			return
+		}
+		if exists {
+			log.Println(video, "- video already exists")
+			continue
+		}
 		ytResp, err := getYTvideoInfo(video, nil)
 		if err != nil {
 			log.Println("Error fetching video info: ", err)
@@ -269,30 +295,46 @@ func migrateDBfromJSON(videos []string) {
 		if err != nil {
 			log.Println("Error inserting video: ", err)
 		}
-		log.Println("Migrated video: " + video)
+		log.Println(video, "- migrated")
 	}
 }
 
+func parseArgs() config {
+	args := os.Args[1:]
+	cfg := config{Migrate: false}
+
+	_, err := clap.Parse(args, &cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return cfg
+}
+
 func main() {
+	args := parseArgs()
 	Env()
 	db.InitDB()
-	// Initial load
-	videos, err := db.GetAllVideos()
+
+	log.Println("Migrate:", args.Migrate)
+	if args.Migrate {
+		migrateDBfromJSON()
+	}
+	if args.ClearDB {
+		db.ClearDB()
+	}
+
+	count, err := db.CountSavedVideos()
 	if err != nil {
-		log.Println("Error getting videos: ", err)
+		log.Println("Error getting number of videos:", err)
 		return
 	}
-	//print videos
-	for _, video := range videos {
-		log.Println(video)
-	}
-	// videos = strings.Join(videos, "\n")
-	// migrateDBfromJSON(videos)
+	log.Println("Number of videos:", count)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/get_random", handleRandom)
 	mux.HandleFunc("/v2/get_random", handleRandomV2)
-	mux.HandleFunc("/add", handleAdd)
+	mux.HandleFunc("/v2/add", handleAdd)
 
 	address := fmt.Sprintf("%s:%s", env.Host.Get(), env.Port.Get())
 

@@ -21,9 +21,9 @@ var DB *sql.DB
 func InitDB() {
 	db, err := sql.Open("sqlite3", env.DBPath.Get())
 	if err != nil {
-		log.Fatal("Error opening database: ", err)
+		log.Fatal("[db] Error opening database: ", err)
 	}
-	log.Println("Database opened successfully: " + env.DBPath.Get())
+	log.Println("[db] Database opened successfully: " + env.DBPath.Get())
 
 	// id (text),
 	// video_name (text),
@@ -34,9 +34,9 @@ func InitDB() {
 	sqlStmt := "CREATE TABLE IF NOT EXISTS videos (id TEXT PRIMARY KEY, video_name TEXT, video_author_username TEXT, is_embeddable BOOLEAN, added_at INTEGER, added_from_ip TEXT)"
 	_, err = db.Exec(sqlStmt)
 	if err != nil {
-		log.Fatal("Error creating table: ", err, sqlStmt)
+		log.Fatal("[db] Error creating table: ", err, sqlStmt)
 	}
-	log.Println("Table created successfully")
+	log.Println("[db] Table created successfully")
 
 	DB = db
 }
@@ -51,12 +51,12 @@ func GetDB() *sql.DB {
 func InsertVideo(video Video) error {
 	stmt, err := DB.Prepare("INSERT OR IGNORE INTO videos (id, video_name, video_author_username, is_embeddable, added_at, added_from_ip) VALUES (?, ?, ?, ?, ?, ?)")
 	if err != nil {
-		log.Println("Error preparing statement: ", err)
+		log.Println("[db] Error preparing statement: ", err)
 		return err
 	}
 	_, err = stmt.Exec(video.ID, video.VideoName, video.VideoAuthorName, video.IsEmbeddable, video.AddedAt, video.AddedFromIP)
 	if err != nil {
-		log.Println("Error inserting video: ", err)
+		log.Println("[db] Error inserting video: ", err)
 		return err
 	}
 	log.Println("Video inserted successfully")
@@ -66,7 +66,7 @@ func InsertVideo(video Video) error {
 func GetRandomVideo() (Video, error) {
 	stmt, err := DB.Prepare("SELECT * FROM videos ORDER BY RANDOM() LIMIT 1")
 	if err != nil {
-		log.Println("Error preparing statement: ", err)
+		log.Println("[db] Error preparing statement: ", err)
 		return Video{}, err
 	}
 	defer stmt.Close()
@@ -74,7 +74,7 @@ func GetRandomVideo() (Video, error) {
 	var video Video
 	err = stmt.QueryRow().Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP)
 	if err != nil {
-		log.Println("Error getting random video: ", err)
+		log.Println("[db] Error getting random video: ", err)
 		return Video{}, err
 	}
 	return video, nil
@@ -83,14 +83,42 @@ func GetRandomVideo() (Video, error) {
 func GetVideosByIP(ip string) ([]Video, error) {
 	stmt, err := DB.Prepare("SELECT * FROM videos WHERE added_from_ip = ?")
 	if err != nil {
-		log.Println("Error preparing statement: ", err)
+		log.Println("[db] Error preparing statement: ", err)
 		return nil, err
 	}
 	defer stmt.Close()
 
 	rows, err := stmt.Query(ip)
 	if err != nil {
-		log.Println("Error getting videos by IP: ", err)
+		log.Println("[db] Error getting videos by IP: ", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	var videos []Video
+	for rows.Next() {
+		var video Video
+		err = rows.Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP)
+		if err != nil {
+			log.Println("[db] Error scanning row: ", err)
+		}
+		videos = append(videos, video)
+	}
+	return videos, nil
+}
+
+func GetAllVideos() ([]Video, error) {
+	//sort by added_at oldest first (asc)
+	stmt, err := DB.Prepare("SELECT * FROM videos ORDER BY added_at ASC")
+	if err != nil {
+		log.Println("[db] Error preparing statement: ", err)
+		return nil, err
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query()
+	if err != nil {
+		log.Println("[db] Error getting videos: ", err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -107,29 +135,52 @@ func GetVideosByIP(ip string) ([]Video, error) {
 	return videos, nil
 }
 
-func GetAllVideos() ([]Video, error) {
-	stmt, err := DB.Prepare("SELECT * FROM videos")
+func CountSavedVideos() (int, error) {
+	stmt, err := DB.Prepare("SELECT COUNT(*) FROM videos")
 	if err != nil {
-		log.Println("Error preparing statement: ", err)
-		return nil, err
+		log.Println("[db] Error preparing statement: ", err)
+		return 0, err
 	}
 	defer stmt.Close()
 
-	rows, err := stmt.Query()
+	var count int
+	err = stmt.QueryRow().Scan(&count)
 	if err != nil {
-		log.Println("Error getting videos: ", err)
-		return nil, err
+		log.Println("[db] Error getting number of videos: ", err)
+		return 0, err
 	}
-	defer rows.Close()
+	return count, nil
+}
 
-	var videos []Video
-	for rows.Next() {
-		var video Video
-		err = rows.Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP)
-		if err != nil {
-			log.Println("Error scanning row: ", err)
-		}
-		videos = append(videos, video)
+func IsVideoSaved(id string) (bool, error) {
+	stmt, err := DB.Prepare("SELECT * FROM videos WHERE id = ?")
+	if err != nil {
+		log.Println("[db] Error preparing statement: ", err)
+		return false, err
 	}
-	return videos, nil
+	defer stmt.Close()
+
+	var video Video
+	err = stmt.QueryRow(id).Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP)
+	if err != nil {
+		log.Println("[db] Video not found: ", err)
+		return false, nil
+	}
+	return true, nil
+}
+
+func ClearDB() {
+	stmt, err := DB.Prepare("DELETE FROM videos")
+	if err != nil {
+		log.Println("[db] Error preparing statement: ", err)
+		return
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec()
+	if err != nil {
+		log.Println("[db] Error clearing database: ", err)
+		return
+	}
+	log.Println("[db] Database cleared successfully")
 }
