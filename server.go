@@ -22,6 +22,7 @@ import (
 type config struct {
 	Migrate bool `clap:"--migrate,-m"`
 	ClearDB bool `clap:"--clear-db,-c"`
+	Update  bool `clap:"--update,-u"`
 }
 
 var (
@@ -45,6 +46,11 @@ type YouTubeResponse struct {
 		Status struct {
 			Embeddable bool `json:"embeddable"`
 		} `json:"status"`
+		ContentDetails struct {
+			ContentRating struct {
+				YTRating string `json:"ytRating"`
+			} `json:"contentRating"`
+		} `json:"contentDetails"`
 	} `json:"items"`
 }
 
@@ -139,47 +145,58 @@ func handleRandom(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if len(videos) == 0 {
-		http.Error(w, "No videos available", http.StatusNotFound)
-		log.Println("Request for random video failed, no videos available")
-		return
-	}
+	// if len(videos) == 0 {
+	// 	http.Error(w, "No videos available", http.StatusNotFound)
+	// 	log.Println("Request for random video failed, no videos available")
+	// 	return
+	// }
 
 	randomVideo := getRandomVideo(videos)
 	fmt.Fprintln(w, randomVideo)
 	log.Println("Requested random video: " + randomVideo)
 }
 
-func getYTvideoInfo(id string, w http.ResponseWriter) (YouTubeResponse, error) {
+func getYTvideoInfo(id string) (YouTubeResponse, error) {
 	apiKey := env.YTDataAPIv3Key.Get()
-	url := fmt.Sprintf("https://www.googleapis.com/youtube/v3/videos?id=%s&key=%s&part=snippet,status", id, apiKey)
+	url := fmt.Sprintf("https://www.googleapis.com/youtube/v3/videos?id=%s&key=%s&part=snippet,status,contentDetails", id, apiKey)
 	resp, err := http.Get(url)
 	if err != nil {
-		http.Error(w, "Failed to fetch video info", http.StatusInternalServerError)
 		log.Println("[yt] Error fetching video info: ", err)
 		return YouTubeResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		http.Error(w, "YouTube API returned error", resp.StatusCode)
 		log.Println("[yt] Error fetching video info: ", resp.Status)
 		return YouTubeResponse{}, err
 	}
 
 	var ytResp YouTubeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&ytResp); err != nil {
-		http.Error(w, "Failed to parse YouTube response", http.StatusInternalServerError)
 		log.Println("[yt] Error parsing YouTube response: ", err)
 		return YouTubeResponse{}, err
 	}
 
 	if len(ytResp.Items) == 0 {
-		http.Error(w, "Video not found", http.StatusNotFound)
 		log.Println("[yt] Video not found: ", id)
 		return YouTubeResponse{}, errors.New("video not found")
 	}
 	return ytResp, nil
+}
+
+func assembleVideo(ytResp YouTubeResponse, ip string, id string) db.Video {
+	item := ytResp.Items[0]
+
+	var embeddable bool = item.Status.Embeddable && item.ContentDetails.ContentRating.YTRating == ""
+
+	return db.Video{
+		ID:              id,
+		VideoName:       item.Snippet.Title,
+		VideoAuthorName: item.Snippet.ChannelTitle,
+		IsEmbeddable:    embeddable,
+		AddedAt:         time.Now().Unix(),
+		AddedFromIP:     ip,
+	}
 }
 
 func handleAdd(w http.ResponseWriter, r *http.Request) {
@@ -211,27 +228,19 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ytResp, err := getYTvideoInfo(id, w)
-	if err != nil {
-		log.Println("Error fetching video info:", err)
-		return
-	}
-
-	item := ytResp.Items[0]
-
 	ip := r.RemoteAddr
 	if prior := r.Header.Get("X-Forwarded-For"); prior != "" {
 		ip = prior
 	}
 
-	video := db.Video{
-		ID:              id,
-		VideoName:       item.Snippet.Title,
-		VideoAuthorName: item.Snippet.ChannelTitle,
-		IsEmbeddable:    item.Status.Embeddable,
-		AddedAt:         time.Now().Unix(),
-		AddedFromIP:     ip,
+	ytResp, err := getYTvideoInfo(id)
+	if err != nil {
+		log.Println("Error fetching video info: ", err)
+		http.Error(w, "Failed to fetch video info", http.StatusInternalServerError)
+		return
 	}
+
+	video := assembleVideo(ytResp, ip, id)
 
 	log.Printf("Parsed video:\n- ID: %s\n- Name: %s\n- Author: %s\n- Embeddable: %t\n- Timestamp: %d\n- IP: %s\n",
 		video.ID,
@@ -279,7 +288,7 @@ func migrateDBfromJSON() {
 			log.Println(video, "- video already exists")
 			continue
 		}
-		ytResp, err := getYTvideoInfo(video, nil)
+		ytResp, err := getYTvideoInfo(video)
 		if err != nil {
 			log.Println("Error fetching video info: ", err)
 			return
@@ -318,13 +327,34 @@ func main() {
 
 	log.Println("Migrate:", args.Migrate)
 	log.Println("ClearDB:", args.ClearDB)
+	log.Println("Update:", args.Update)
 	if args.Migrate {
 		migrateDBfromJSON()
 	}
 	if args.ClearDB {
 		db.ClearDB()
 	}
-
+	if args.Update {
+		videos, err := db.GetAllVideos()
+		if err != nil {
+			log.Println("Error getting videos:", err)
+			return
+		}
+		for _, video := range videos {
+			log.Println(video, "- updating video credentials...")
+			ytResp, err := getYTvideoInfo(video.ID)
+			if err != nil {
+				log.Println("Error fetching video info: ", err)
+				continue
+			}
+			updatedVideo := assembleVideo(ytResp, "migrated", video.ID)
+			err = db.UpdateVideo(updatedVideo)
+			if err != nil {
+				log.Println("Error updating video: ", err)
+			}
+			log.Println(video, "- updated")
+		}
+	}
 	count, err := db.CountSavedVideos()
 	if err != nil {
 		log.Println("Error getting number of videos:", err)

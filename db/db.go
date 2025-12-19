@@ -184,3 +184,20 @@ func ClearDB() {
 	}
 	log.Println("[db] Database cleared successfully")
 }
+
+func UpdateVideo(video Video) error {
+	stmt, err := DB.Prepare("UPDATE videos SET video_name = ?, video_author_username = ?, is_embeddable = ?, added_at = ?, added_from_ip = ? WHERE id = ?")
+	if err != nil {
+		log.Println("[db] Error preparing statement: ", err)
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(video.VideoName, video.VideoAuthorName, video.IsEmbeddable, video.AddedAt, video.AddedFromIP, video.ID)
+	if err != nil {
+		log.Println("[db] Error updating video: ", err)
+		return err
+	}
+	log.Println("[db] Video updated successfully")
+	return nil
+}
