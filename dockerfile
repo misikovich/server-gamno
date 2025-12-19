@@ -48,7 +48,11 @@ COPY videos.json .
 RUN touch videos.db
 
 # Expose the port (defaulting to 8080 or whatever is in your .env)
-EXPOSE 8080
+EXPOSE 1488
+#my server is hosted on api.femboyz.cloud:1488 what should i add to the dockerfile to make it work?
+#you should add the following to the dockerfile:
+ENV HOST=api.femboyz.cloud
+ENV PORT=1488
 
 # Run the server
 CMD ["./server"]
