@@ -317,6 +317,7 @@ func main() {
 	db.InitDB()
 
 	log.Println("Migrate:", args.Migrate)
+	log.Println("ClearDB:", args.ClearDB)
 	if args.Migrate {
 		migrateDBfromJSON()
 	}
