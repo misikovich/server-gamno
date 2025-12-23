@@ -21,7 +21,7 @@ import (
 
 type config struct {
 	Migrate bool `clap:"--migrate,-m"`
-	ClearDB bool `clap:"--clear-db,-c"`
+	ClearDB bool `clap:"--YES-I-REALLY-WANT-TO-DELETE-ALL-DATA"`
 	Update  bool `clap:"--update,-u"`
 }
 
@@ -35,6 +35,7 @@ type VideoResponse struct {
 	VideoName       string `json:"video_name"`
 	VideoAuthorName string `json:"video_author_name"`
 	IsEmbeddable    bool   `json:"is_embeddable"`
+	LogoURL         string `json:"logo_url"`
 }
 
 type YouTubeResponse struct {
@@ -42,6 +43,7 @@ type YouTubeResponse struct {
 		Snippet struct {
 			Title        string `json:"title"`
 			ChannelTitle string `json:"channelTitle"`
+			ChannelID    string `json:"channelId"`
 		} `json:"snippet"`
 		Status struct {
 			Embeddable bool `json:"embeddable"`
@@ -51,6 +53,18 @@ type YouTubeResponse struct {
 				YTRating string `json:"ytRating"`
 			} `json:"contentRating"`
 		} `json:"contentDetails"`
+	} `json:"items"`
+}
+
+type YTChannelResponse struct {
+	Items []struct {
+		Snippet struct {
+			Thumbnails struct {
+				Default struct {
+					URL string `json:"url"`
+				} `json:"default"`
+			} `json:"thumbnails"`
+		} `json:"snippet"`
 	} `json:"items"`
 }
 
@@ -129,6 +143,12 @@ func handleRandomV2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logo, err := fetchYTLogoLink(video.ChannelID)
+	if err != nil {
+		log.Println("Error fetching logo: ", err)
+		logo = ""
+	}
+
 	//return json response in VideoResponse format
 	w.Header().Set("Content-Type", "application/json")
 	response := VideoResponse{
@@ -136,6 +156,7 @@ func handleRandomV2(w http.ResponseWriter, r *http.Request) {
 		VideoName:       video.VideoName,
 		VideoAuthorName: video.VideoAuthorName,
 		IsEmbeddable:    video.IsEmbeddable,
+		LogoURL:         logo,
 	}
 	json.NewEncoder(w).Encode(response)
 	log.Println("Requested random video: " + video.ID)
@@ -156,7 +177,7 @@ func handleRandom(w http.ResponseWriter, r *http.Request) {
 	log.Println("Requested random video: " + randomVideo)
 }
 
-func getYTvideoInfo(id string) (YouTubeResponse, error) {
+func fetchYTVideoInfo(id string) (YouTubeResponse, error) {
 	apiKey := env.YTDataAPIv3Key.Get()
 	url := fmt.Sprintf("https://www.googleapis.com/youtube/v3/videos?id=%s&key=%s&part=snippet,status,contentDetails", id, apiKey)
 	resp, err := http.Get(url)
@@ -196,6 +217,7 @@ func assembleVideo(ytResp YouTubeResponse, ip string, id string) db.Video {
 		IsEmbeddable:    embeddable,
 		AddedAt:         time.Now().Unix(),
 		AddedFromIP:     ip,
+		ChannelID:       item.Snippet.ChannelID,
 	}
 }
 
@@ -233,7 +255,7 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 		ip = prior
 	}
 
-	ytResp, err := getYTvideoInfo(id)
+	ytResp, err := fetchYTVideoInfo(id)
 	if err != nil {
 		log.Println("Error fetching video info: ", err)
 		http.Error(w, "Failed to fetch video info", http.StatusInternalServerError)
@@ -242,13 +264,14 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 
 	video := assembleVideo(ytResp, ip, id)
 
-	log.Printf("Parsed video:\n- ID: %s\n- Name: %s\n- Author: %s\n- Embeddable: %t\n- Timestamp: %d\n- IP: %s\n",
+	log.Printf("Parsed video:\n- ID: %s\n- Name: %s\n- Author: %s\n- Embeddable: %t\n- Timestamp: %d\n- IP: %s\n Channel ID: %s\n",
 		video.ID,
 		video.VideoName,
 		video.VideoAuthorName,
 		video.IsEmbeddable,
 		video.AddedAt,
 		video.AddedFromIP,
+		video.ChannelID,
 	)
 
 	// Insert into Database
@@ -270,6 +293,7 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 		VideoName:       video.VideoName,
 		VideoAuthorName: video.VideoAuthorName,
 		IsEmbeddable:    video.IsEmbeddable,
+		LogoURL:         "",
 	}
 	json.NewEncoder(w).Encode(response)
 	//fmt.Fprintf(w, "Successfully added video '%s' (%s)\n", video.ID, video.VideoName)
@@ -288,7 +312,7 @@ func migrateDBfromJSON() {
 			log.Println(video, "- video already exists")
 			continue
 		}
-		ytResp, err := getYTvideoInfo(video)
+		ytResp, err := fetchYTVideoInfo(video)
 		if err != nil {
 			log.Println("Error fetching video info: ", err)
 			return
@@ -320,6 +344,28 @@ func parseArgs() config {
 	return cfg
 }
 
+
+func fetchYTLogoLink(channelId string) (string, error) {
+	apiKey := env.YTDataAPIv3Key.Get()
+	url := fmt.Sprintf("https://www.googleapis.com/youtube/v3/channels?part=snippet&id=%s&key=%s", channelId, apiKey)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var ytResp YTChannelResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ytResp); err != nil {
+		return "", err
+	}
+
+	if len(ytResp.Items) == 0 {
+		return "", errors.New("channel not found")
+	}
+	return ytResp.Items[0].Snippet.Thumbnails.Default.URL, nil
+}
+
 func main() {
 	args := parseArgs()
 	Env()
@@ -342,12 +388,12 @@ func main() {
 		}
 		for _, video := range videos {
 			log.Println(video, "- updating video credentials...")
-			ytResp, err := getYTvideoInfo(video.ID)
+			ytResp, err := fetchYTVideoInfo(video.ID)
 			if err != nil {
 				log.Println("Error fetching video info: ", err)
 				continue
 			}
-			updatedVideo := assembleVideo(ytResp, "migrated", video.ID)
+			updatedVideo := assembleVideo(ytResp, video.AddedFromIP, video.ID)
 			err = db.UpdateVideo(updatedVideo)
 			if err != nil {
 				log.Println("Error updating video: ", err)

@@ -14,6 +14,7 @@ type Video struct {
 	IsEmbeddable    bool   `json:"is_embeddable"`
 	AddedAt         int64  `json:"added_at"`
 	AddedFromIP     string `json:"added_from_ip"`
+	ChannelID       string `json:"channel_id"`
 }
 
 var DB *sql.DB
@@ -31,7 +32,8 @@ func InitDB() {
 	// is_embeddable (bool),
 	// added_at (unix timestamp),
 	// added_from_ip (ip address)
-	sqlStmt := "CREATE TABLE IF NOT EXISTS videos (id TEXT PRIMARY KEY, video_name TEXT, video_author_username TEXT, is_embeddable BOOLEAN, added_at INTEGER, added_from_ip TEXT)"
+	// channel_id (text)
+	sqlStmt := "CREATE TABLE IF NOT EXISTS videos (id TEXT PRIMARY KEY, video_name TEXT, video_author_username TEXT, is_embeddable BOOLEAN, added_at INTEGER, added_from_ip TEXT, channel_id TEXT)"
 	_, err = db.Exec(sqlStmt)
 	if err != nil {
 		log.Fatal("[db] Error creating table: ", err, sqlStmt)
@@ -49,12 +51,12 @@ func GetDB() *sql.DB {
 // answer: no
 // solution: use INSERT OR IGNORE
 func InsertVideo(video Video) error {
-	stmt, err := DB.Prepare("INSERT OR IGNORE INTO videos (id, video_name, video_author_username, is_embeddable, added_at, added_from_ip) VALUES (?, ?, ?, ?, ?, ?)")
+	stmt, err := DB.Prepare("INSERT OR IGNORE INTO videos (id, video_name, video_author_username, is_embeddable, added_at, added_from_ip, channel_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		log.Println("[db] Error preparing statement: ", err)
 		return err
 	}
-	_, err = stmt.Exec(video.ID, video.VideoName, video.VideoAuthorName, video.IsEmbeddable, video.AddedAt, video.AddedFromIP)
+	_, err = stmt.Exec(video.ID, video.VideoName, video.VideoAuthorName, video.IsEmbeddable, video.AddedAt, video.AddedFromIP, video.ChannelID)
 	if err != nil {
 		log.Println("[db] Error inserting video: ", err)
 		return err
@@ -72,7 +74,7 @@ func GetRandomVideo() (Video, error) {
 	defer stmt.Close()
 
 	var video Video
-	err = stmt.QueryRow().Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP)
+	err = stmt.QueryRow().Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP, &video.ChannelID)
 	if err != nil {
 		log.Println("[db] Error getting random video: ", err)
 		return Video{}, err
@@ -98,7 +100,7 @@ func GetVideosByIP(ip string) ([]Video, error) {
 	var videos []Video
 	for rows.Next() {
 		var video Video
-		err = rows.Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP)
+		err = rows.Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP, &video.ChannelID)
 		if err != nil {
 			log.Println("[db] Error scanning row: ", err)
 		}
@@ -126,7 +128,7 @@ func GetAllVideos() ([]Video, error) {
 	var videos []Video
 	for rows.Next() {
 		var video Video
-		err = rows.Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP)
+		err = rows.Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP, &video.ChannelID)
 		if err != nil {
 			log.Println("Error scanning row: ", err)
 		}
@@ -161,7 +163,7 @@ func IsVideoSaved(id string) (bool, error) {
 	defer stmt.Close()
 
 	var video Video
-	err = stmt.QueryRow(id).Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP)
+	err = stmt.QueryRow(id).Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP, &video.ChannelID)
 	if err != nil {
 		log.Println("[db] Video not found: ", err)
 		return false, nil
@@ -186,14 +188,14 @@ func ClearDB() {
 }
 
 func UpdateVideo(video Video) error {
-	stmt, err := DB.Prepare("UPDATE videos SET video_name = ?, video_author_username = ?, is_embeddable = ?, added_at = ?, added_from_ip = ? WHERE id = ?")
+	stmt, err := DB.Prepare("UPDATE videos SET video_name = ?, video_author_username = ?, is_embeddable = ?, added_at = ?, added_from_ip = ?, channel_id = ? WHERE id = ?")
 	if err != nil {
 		log.Println("[db] Error preparing statement: ", err)
 		return err
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(video.VideoName, video.VideoAuthorName, video.IsEmbeddable, video.AddedAt, video.AddedFromIP, video.ID)
+	_, err = stmt.Exec(video.VideoName, video.VideoAuthorName, video.IsEmbeddable, video.AddedAt, video.AddedFromIP, video.ChannelID, video.ID)
 	if err != nil {
 		log.Println("[db] Error updating video: ", err)
 		return err
