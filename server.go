@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -235,6 +236,15 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sanitizedID, err := SANITIZE_ID(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		log.Println("Request for adding video failed, [invalid video 'id' parameter]")
+		log.Println("TRY: ", id)
+		return
+	}
+	id = sanitizedID
+
 	log.Println("Requested adding video: " + id)
 
 	//check if video exists
@@ -344,7 +354,6 @@ func parseArgs() config {
 	return cfg
 }
 
-
 func fetchYTLogoLink(channelId string) (string, error) {
 	apiKey := env.YTDataAPIv3Key.Get()
 	url := fmt.Sprintf("https://www.googleapis.com/youtube/v3/channels?part=snippet&id=%s&key=%s", channelId, apiKey)
@@ -364,6 +373,17 @@ func fetchYTLogoLink(channelId string) (string, error) {
 		return "", errors.New("channel not found")
 	}
 	return ytResp.Items[0].Snippet.Thumbnails.Default.URL, nil
+}
+
+func SANITIZE_ID(id string) (string, error) {
+	if len(id) != 11 {
+		return "", errors.New("sybau nigga")
+	}
+	re := regexp.MustCompile(`[^a-zA-Z0-9]`)
+	if re.MatchString(id) {
+		return "", errors.New("sybau nigga")
+	}
+	return id, nil
 }
 
 func main() {
