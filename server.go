@@ -10,7 +10,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -200,7 +199,7 @@ func fetchYTVideoInfo(id string) (YouTubeResponse, error) {
 	}
 
 	if len(ytResp.Items) == 0 {
-		log.Println("[yt] Video not found: ", id)
+		// log.Println("[yt] Video not found: ", id)
 		return YouTubeResponse{}, errors.New("video not found")
 	}
 	return ytResp, nil
@@ -222,59 +221,71 @@ func assembleVideo(ytResp YouTubeResponse, ip string, id string) db.Video {
 	}
 }
 
+// generates a random request ID
+// curr unix time + random number
+// 01724:910412
+func genRequestID() string {
+	return fmt.Sprintf("%d:%d", time.Now().Unix(), rand.Intn(9000)+1000)
+}
+
 func handleAdd(w http.ResponseWriter, r *http.Request) {
+	requestID := genRequestID()
+	ip := r.RemoteAddr
+	if prior := r.Header.Get("X-Forwarded-For"); prior != "" {
+		ip = prior
+	}
+	log.Printf("[%s] [NEW] [/v2/add] [%s] request ADD VIDEO", requestID, ip)
+
 	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
-		log.Println("Request for adding video failed, [method not allowed]")
+		http.Error(w, getRandomErrorResponse(), http.StatusBadRequest)
+		log.Printf("[%s] [REJECT] method not allowed: '%s'", requestID, r.Method)
+		log.Printf("[%s] TRY: '%s'\n", requestID, r.URL.RawQuery)
 		return
 	}
 
 	id := r.URL.Query().Get("id")
 	if id == "" {
-		http.Error(w, "Missing video 'id' parameter", http.StatusBadRequest)
-		log.Println("Request for adding video failed, [missing video 'id' parameter]")
+		http.Error(w, getRandomErrorResponse(), http.StatusBadRequest)
+		log.Printf("[%s] [REJECT] missing 'id' parameter", requestID)
+		log.Printf("[%s] TRY: '%s'\n", requestID, r.URL.RawQuery)
 		return
 	}
 
-	sanitizedID, err := SANITIZE_ID(id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		log.Println("Request for adding video failed, [invalid video 'id' parameter]")
-		log.Println("TRY: ", id)
+	if !isValidID(id) {
+		http.Error(w, getRandomErrorResponse(), http.StatusBadRequest)
+		log.Printf("[%s] [REJECT] invalid 'id' parameter", requestID)
+		log.Printf("[%s] TRY: '%s'\n", requestID, r.URL.RawQuery)
 		return
 	}
-	id = sanitizedID
 
-	log.Println("Requested adding video: " + id)
+	log.Printf("[%s] [CONTINUE] Request is valid, adding video: %s", requestID, id)
 
 	//check if video exists
 	exists, err := db.IsVideoSaved(id)
 	if err != nil {
 		http.Error(w, "Failed to check if video exists", http.StatusInternalServerError)
-		log.Println("Error checking if video exists: ", err)
+		log.Printf("[%s] [WARN] [DB] Error checking if video exists: %s", requestID, err)
 		return
 	}
 	if exists {
 		http.Error(w, "Video already exists", http.StatusConflict)
-		log.Println("Request for adding video failed, [video already exists]")
+		log.Printf("[%s] [REJECT] [DB] Video already exists: %s", requestID, id)
 		return
 	}
-
-	ip := r.RemoteAddr
-	if prior := r.Header.Get("X-Forwarded-For"); prior != "" {
-		ip = prior
-	}
+	log.Printf("[%s] [DB] ID is not in database: %s", requestID, id)
 
 	ytResp, err := fetchYTVideoInfo(id)
 	if err != nil {
-		log.Println("Error fetching video info: ", err)
-		http.Error(w, "Failed to fetch video info", http.StatusInternalServerError)
+		log.Printf("[%s] [REJECT] [YT] Error fetching video info: %s", requestID, err)
+		http.Error(w, "", http.StatusNotFound)
 		return
 	}
+	log.Printf("[%s] [CONTINUE] [YT] Video info fetched: %s", requestID, id)
 
 	video := assembleVideo(ytResp, ip, id)
 
-	log.Printf("Parsed video:\n- ID: %s\n- Name: %s\n- Author: %s\n- Embeddable: %t\n- Timestamp: %d\n- IP: %s\n Channel ID: %s\n",
+	log.Printf("[%s] Parsed video:\n- ID: %s\n- Name: %s\n- Author: %s\n- Embeddable: %t\n- Timestamp: %d\n- IP: %s\n- Channel ID: %s\n",
+		requestID,
 		video.ID,
 		video.VideoName,
 		video.VideoAuthorName,
@@ -286,7 +297,7 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 
 	// Insert into Database
 	if err := db.InsertVideo(video); err != nil {
-		log.Println("Failed to insert video into database: ", err)
+		log.Printf("[%s] [FATAL] [DB] Failed to insert video into database: %s", requestID, err)
 		// We continue even if DB insert fails? Or return error?
 		// For now, let's just log it and continue with the JSON file update
 		http.Error(w, "servaku pizda", http.StatusInternalServerError)
@@ -375,15 +386,42 @@ func fetchYTLogoLink(channelId string) (string, error) {
 	return ytResp.Items[0].Snippet.Thumbnails.Default.URL, nil
 }
 
-func SANITIZE_ID(id string) (string, error) {
+func isValidID(id string) bool {
 	if len(id) != 11 {
-		return "", errors.New("sybau nigga")
+		return false
 	}
-	re := regexp.MustCompile(`[^a-zA-Z0-9]`)
-	if re.MatchString(id) {
-		return "", errors.New("sybau nigga")
+	out := make([]byte, 0, 11)
+
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if (c >= 'a' && c <= 'z') ||
+			(c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') ||
+			c == '_' || c == '-' {
+			out = append(out, c)
+			if len(out) == 11 {
+				break
+			}
+		}
 	}
-	return id, nil
+
+	if len(out) != 11 {
+		return false
+	}
+	return true
+}
+
+func getRandomErrorResponse() string {
+	// how to close the array?
+	errors := []string{
+		"sybau nigga",
+		"noooo what u have done nigga the server is downnn xO",
+		"67",
+		"bebra",
+		"pu pu pu",
+		"pizda servaky xO",
+	}
+	return errors[rand.Intn(len(errors))]
 }
 
 func main() {
@@ -452,7 +490,7 @@ func main() {
 }
 
 func serve(addr string, mux *http.ServeMux) error {
-	log.Printf("Server starting on http://%s\n", addr)
+	log.Printf("Server starting on http://%s\n\n", addr)
 	return http.ListenAndServe(addr, mux)
 }
 
@@ -470,6 +508,6 @@ func serveTLS(addr string, mux *http.ServeMux) error {
 
 	log.Println("TLS cert path: ", env.TLSCertPath.Get())
 	log.Println("TLS key path: ", env.TLSKeyPath.Get())
-	log.Printf("Server starting on https://%s\n", addr)
+	log.Printf("Server starting on https://%s\n\n", addr)
 	return http.ListenAndServeTLS(addr, env.TLSCertPath.Get(), env.TLSKeyPath.Get(), handler)
 }

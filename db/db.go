@@ -61,7 +61,7 @@ func InsertVideo(video Video) error {
 		log.Println("[db] Error inserting video: ", err)
 		return err
 	}
-	log.Println("Video inserted successfully")
+	log.Println("[db] Video inserted successfully")
 	return nil
 }
 
@@ -165,7 +165,7 @@ func IsVideoSaved(id string) (bool, error) {
 	var video Video
 	err = stmt.QueryRow(id).Scan(&video.ID, &video.VideoName, &video.VideoAuthorName, &video.IsEmbeddable, &video.AddedAt, &video.AddedFromIP, &video.ChannelID)
 	if err != nil {
-		log.Println("[db] Video not found: ", err)
+		// log.Println("[db] Video not found: ", err)
 		return false, nil
 	}
 	return true, nil
